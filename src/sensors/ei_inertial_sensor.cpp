@@ -44,19 +44,39 @@
 
 LOG_MODULE_REGISTER(acc_sensor);
 
-static const struct device *const accel_dev = DEVICE_DT_GET(DT_ALIAS(accel0));
+/* Ranges and units match the training data (BMI270 at +-16 g / +-2000 dps, in g and dps) */
+#define IMU_ACC_RANGE_G             16
+#define IMU_GYR_RANGE_DPS           2000
+#define IMU_ODR_HZ                  400
+#define MS2_PER_G                   9.80665f
+#define DPS_PER_RAD_S               57.29578f
+
+static const struct device *const accel_dev = DEVICE_DT_GET(DT_ALIAS(imu0));
 static float acc_data[ACC_AXIS_SAMPLED];
 static bool inertial_init = false;
 
 /**
- * @brief      Setup accelerometer convert value
+ * @brief      Setup accelerometer and gyroscope range and output data rate
  *
  * @return     false if communinication error occured
  */
 bool ei_acc_init(void)
 {
+    struct sensor_value acc_range = { IMU_ACC_RANGE_G, 0 };
+    struct sensor_value gyr_range = { IMU_GYR_RANGE_DPS, 0 };
+    struct sensor_value odr = { IMU_ODR_HZ, 0 };
+
     if (!device_is_ready(accel_dev)) {
         LOG_ERR("sensor: device %s not ready.\n", accel_dev->name);
+        return false;
+    }
+
+    /* setting the ODR also powers on the accelerometer and gyroscope */
+    if (sensor_attr_set(accel_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE, &acc_range) < 0
+        || sensor_attr_set(accel_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr) < 0
+        || sensor_attr_set(accel_dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_FULL_SCALE, &gyr_range) < 0
+        || sensor_attr_set(accel_dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr) < 0) {
+        LOG_ERR("Failed to configure IMU\n");
         return false;
     }
 
@@ -88,14 +108,24 @@ static bool ei_acc_fetch_sample(void)
         return false;
     }
 
-    if (sensor_channel_get(accel_dev, SENSOR_CHAN_ACCEL_XYZ, raw_sample) < 0) {
+    if (sensor_channel_get(accel_dev, SENSOR_CHAN_ACCEL_XYZ, &raw_sample[0]) < 0) {
         LOG_ERR("Failed to get accel readings\n");
         return false;
     }
 
-    acc_data[0] = (float)sensor_value_to_double(&raw_sample[0]);
-    acc_data[1] = (float)sensor_value_to_double(&raw_sample[1]);
-    acc_data[2] = (float)sensor_value_to_double(&raw_sample[2]);
+    if (sensor_channel_get(accel_dev, SENSOR_CHAN_GYRO_XYZ, &raw_sample[3]) < 0) {
+        LOG_ERR("Failed to get gyro readings\n");
+        return false;
+    }
+
+    /* m/s2 -> g */
+    acc_data[0] = (float)sensor_value_to_double(&raw_sample[0]) / MS2_PER_G;
+    acc_data[1] = (float)sensor_value_to_double(&raw_sample[1]) / MS2_PER_G;
+    acc_data[2] = (float)sensor_value_to_double(&raw_sample[2]) / MS2_PER_G;
+    /* rad/s -> dps */
+    acc_data[3] = (float)sensor_value_to_double(&raw_sample[3]) * DPS_PER_RAD_S;
+    acc_data[4] = (float)sensor_value_to_double(&raw_sample[4]) * DPS_PER_RAD_S;
+    acc_data[5] = (float)sensor_value_to_double(&raw_sample[5]) * DPS_PER_RAD_S;
 
     return true;
 }

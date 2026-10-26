@@ -59,7 +59,13 @@
 		light0 = &bh1749;
 		bme68xi2c1 = &i2c1;
 		mic0 = &i2c1;
+		imu0 = &bmi270;
 	};
+};
+
+/* 6-axis IMU (accelerometer + gyroscope), disabled by default in the board DTS */
+&bmi270 {
+	status = "okay";
 };
 
 &zephyr_udc0 {

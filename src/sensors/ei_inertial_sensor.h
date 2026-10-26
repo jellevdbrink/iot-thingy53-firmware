@@ -39,7 +39,7 @@
 #include "firmware-sdk/ei_fusion.h"
 
 /** Number of axis used and sample data format */
-#define ACC_AXIS_SAMPLED            3
+#define ACC_AXIS_SAMPLED            6
 
 /* Function prototypes ----------------------------------------------------- */
 bool ei_acc_init(void);
@@ -47,13 +47,14 @@ float *ei_fusion_acc_read_data(int n_samples);
 
 static const ei_device_fusion_sensor_t accelerometer_sensor = {
     // name of sensor module to be displayed in fusion list
-    "Accelerometer",
+    "Inertial",
     // number of sensor module axis
     ACC_AXIS_SAMPLED,
     // sampling frequencies
-    { 20.0f, 62.5f, 100.0f },
+    { 20.0f, 62.5f, 100.0f, 333.33f },
     // axis name and units payload (must be same order as read in)
-    { {"accX", "m/s2"}, {"accY", "m/s2"}, {"accZ", "m/s2"} },
+    { {"accX", "g"}, {"accY", "g"}, {"accZ", "g"},
+      {"gyrX", "dps"}, {"gyrY", "dps"}, {"gyrZ", "dps"} },
     // reference to read data function
     &ei_fusion_acc_read_data,
     0
