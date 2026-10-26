@@ -1,0 +1,5 @@
+.DS_Stroe
+build/
+.vscode/
+copy-sdk.sh
+create-arduino-library.sh
