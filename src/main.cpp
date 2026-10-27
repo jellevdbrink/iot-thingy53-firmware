@@ -83,27 +83,27 @@ int main(void)
         LOG_ERR("Light sensor communication error occured");
     }
 
-    /* Setup the magnetometer sensor */
-    if(ei_mag_init() == false) {
-        LOG_ERR("Magnetometer communication error occured");
-    }
+    // /* Setup the magnetometer sensor */
+    // if(ei_mag_init() == false) {
+    //     LOG_ERR("Magnetometer communication error occured");
+    // }
 
-    /* Setup the light sensor */
-    if(ei_lightsensor_init() == false) {
-        LOG_ERR("Light sensor communication error occured");
-    }
+    // /* Setup the light sensor */
+    // if(ei_lightsensor_init() == false) {
+    //     LOG_ERR("Light sensor communication error occured");
+    // }
 
-    /* Setup the env sensor */
-    if(ei_environment_init() == false) {
-        LOG_ERR("Environment sensor communication error occured");
-    }
+    // /* Setup the env sensor */
+    // if(ei_environment_init() == false) {
+    //     LOG_ERR("Environment sensor communication error occured");
+    // }
 
-    /* Setup the microphone sensor */
-    if (ei_microphone_init() == false) {
-        LOG_ERR("Microphone init failed!");
-    }
+    // /* Setup the microphone sensor */
+    // if (ei_microphone_init() == false) {
+    //     LOG_ERR("Microphone init failed!");
+    // }
 
-    // init BLE stack
+    // // init BLE stack
     ei_ble_com_init();
 
     // we have to do this later because the BLE stack is not available on boot
