@@ -61,6 +61,114 @@ static float samples_circ_buff[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE];
 static int samples_wr_index = 0;
 static EiDeviceThingy53 *dev = static_cast<EiDeviceThingy53*>(EiDeviceInfo::get_device());
 
+/* Triggered mode (non-continuous), works like the SmartTennisRacket firmware the model was
+ * trained for: wait for a stroke (impact or fast swing), then classify the window centred on it */
+#define TRIGGER_ACC_G               13.0f   // impact, same threshold as the original firmware
+#define TRIGGER_GYR_DPS             800.0f  // fast swing, so strokes without a ball trigger too
+#define TRIGGER_PRE_SAMPLES         (EI_CLASSIFIER_RAW_SAMPLE_COUNT / 2)
+#define TRIGGER_HOLDOFF_SAMPLES     (EI_CLASSIFIER_RAW_SAMPLE_COUNT / 2)  // ignore follow-through
+#define TRIGGER_MIN_PROBABILITY     0.8f    // below this a stroke is reported as nothing
+
+/* trigger check assumes the axis order accX, accY, accZ, gyrX, gyrY, gyrZ */
+static_assert(EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME == 6, "trigger expects 6 axes (acc + gyro)");
+
+static float trigger_buff[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE];
+static int trigger_wr_index = 0;        // next sample slot in trigger_buff (in samples)
+static int trigger_samples_left = 0;    // > 0 after a trigger: samples still to collect
+static int trigger_holdoff = 0;         // samples to wait before the next trigger is allowed
+
+static inline inference_state_t set_thread_state(inference_state_t new_state);
+
+static bool is_trigger_sample(const float *sample)
+{
+    float gyr_sq = sample[3] * sample[3] + sample[4] * sample[4] + sample[5] * sample[5];
+
+    return (fabsf(sample[0]) >= TRIGGER_ACC_G) || (fabsf(sample[1]) >= TRIGGER_ACC_G)
+        || (fabsf(sample[2]) >= TRIGGER_ACC_G) || (gyr_sq >= TRIGGER_GYR_DPS * TRIGGER_GYR_DPS);
+}
+
+/**
+ * @brief Called for each single sample in triggered mode, keeps the last
+ *        window in a ring buffer and signals when a window around a trigger is complete
+ */
+static bool trigger_samples_callback(const void *raw_sample, uint32_t raw_sample_size)
+{
+    const float *sample = (const float *)raw_sample;
+
+    if(state == INFERENCE_STOPPED) {
+        // stop the sampler
+        return true;
+    }
+    if(state != INFERENCE_SAMPLING) {
+        // previous window is being copied, drop this sample
+        return false;
+    }
+
+    memcpy(&trigger_buff[trigger_wr_index * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME], sample,
+           EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME * sizeof(float));
+    trigger_wr_index = (trigger_wr_index + 1) % EI_CLASSIFIER_RAW_SAMPLE_COUNT;
+
+    if(trigger_samples_left > 0) {
+        if(--trigger_samples_left == 0) {
+            set_thread_state(INFERENCE_DATA_READY);
+        }
+        return false;
+    }
+
+    if(trigger_holdoff > 0) {
+        trigger_holdoff--;
+        return false;
+    }
+
+    if(is_trigger_sample(sample)) {
+        // trigger sample ends up in the middle of the window
+        trigger_samples_left = EI_CLASSIFIER_RAW_SAMPLE_COUNT - TRIGGER_PRE_SAMPLES - 1;
+    }
+
+    return false;
+}
+
+/**
+ * @brief Copy the ring buffer (oldest sample first) into samples_circ_buff and resume sampling
+ */
+static void trigger_take_window(void)
+{
+    for(int i = 0; i < EI_CLASSIFIER_RAW_SAMPLE_COUNT; i++) {
+        int src = (trigger_wr_index + i) % EI_CLASSIFIER_RAW_SAMPLE_COUNT;
+        memcpy(&samples_circ_buff[i * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME],
+               &trigger_buff[src * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME],
+               EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME * sizeof(float));
+    }
+
+    trigger_holdoff = TRIGGER_HOLDOFF_SAMPLES;
+    set_thread_state(INFERENCE_SAMPLING);
+}
+
+/**
+ * @brief Print the detected stroke: most likely label other than "nothing", if confident enough
+ */
+static void print_trigger_result(ei_impulse_result_t *result)
+{
+    int best = -1;
+
+    for(int ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+        if(strcmp(result->classification[ix].label, "nothing") == 0) {
+            continue;
+        }
+        if(best < 0 || result->classification[ix].value > result->classification[best].value) {
+            best = ix;
+        }
+    }
+
+    if(best >= 0 && result->classification[best].value >= TRIGGER_MIN_PROBABILITY) {
+        ei_printf("Stroke: %s (%.2f)\n", result->classification[best].label,
+                  result->classification[best].value);
+    }
+    else {
+        ei_printf("Stroke: nothing\n");
+    }
+}
+
 static inline inference_state_t set_thread_state(inference_state_t new_state)
 {
     if(state != INFERENCE_STOPPED) {
@@ -155,14 +263,17 @@ void ei_inference_thread(void* param1, void* param2, void* param3)
                 // start sampling now, don't collect samples during waiting period
 #if MULTI_FREQ_ENABLED == 1
                 if (is_fusion) {
-                    ei_multi_fusion_sample_start(&samples_callback, EI_CLASSIFIER_INTERVAL_MS);
+                    ei_multi_fusion_sample_start(continuous_mode ? &samples_callback : &trigger_samples_callback, EI_CLASSIFIER_INTERVAL_MS);
                 }
                 else {
-                    ei_fusion_sample_start(&samples_callback, EI_CLASSIFIER_INTERVAL_MS);
+                    ei_fusion_sample_start(continuous_mode ? &samples_callback : &trigger_samples_callback, EI_CLASSIFIER_INTERVAL_MS);
                 }
 #else
-                ei_fusion_sample_start(&samples_callback, EI_CLASSIFIER_INTERVAL_MS);
+                ei_fusion_sample_start(continuous_mode ? &samples_callback : &trigger_samples_callback, EI_CLASSIFIER_INTERVAL_MS);
 #endif
+                if(!continuous_mode) {
+                    ei_printf("Waiting for a stroke...\n");
+                }
                 dev->set_state(eiStateSampling);
                 continue;
             case INFERENCE_SAMPLING:
@@ -179,11 +290,17 @@ void ei_inference_thread(void* param1, void* param2, void* param3)
 
         signal_t signal;
 
-        // shift circular buffer, so the newest data will be the first
-        // if samples_wr_index is 0, then roll is immediately returning
-        numpy::roll(samples_circ_buff, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, (-samples_wr_index));
-        /* reset wr index, the oldest data will be overwritten */
-        samples_wr_index = 0;
+        if(continuous_mode == true) {
+            // shift circular buffer, so the newest data will be the first
+            // if samples_wr_index is 0, then roll is immediately returning
+            numpy::roll(samples_circ_buff, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, (-samples_wr_index));
+            /* reset wr index, the oldest data will be overwritten */
+            samples_wr_index = 0;
+        }
+        else {
+            // copy the window around the trigger, sampling continues while classifying
+            trigger_take_window();
+        }
 
         // Create a data structure to represent this window of data
         int err = numpy::signal_from_buffer(samples_circ_buff, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, &signal);
@@ -215,14 +332,11 @@ void ei_inference_thread(void* param1, void* param2, void* param3)
         }
         else {
             process_results(&result);
+            print_trigger_result(&result);
         }
 
         if(continuous_mode == true) {
             set_thread_state(INFERENCE_SAMPLING);
-        }
-        else {
-            ei_printf("Starting inferencing in 2 seconds...\n");
-            set_thread_state(INFERENCE_WAITING);
         }
     }
 }
@@ -265,6 +379,12 @@ void ei_start_impulse(bool continuous, bool debug, bool use_max_uart_speed)
     }
     else {
         samples_per_inference = EI_CLASSIFIER_RAW_SAMPLE_COUNT * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
+        // triggered mode: fill a complete window before the first trigger is allowed
+        trigger_wr_index = 0;
+        trigger_samples_left = 0;
+        trigger_holdoff = EI_CLASSIFIER_RAW_SAMPLE_COUNT;
+        ei_printf("Trigger: %.0f g or %.0f dps, stroke reported above %.2f\n",
+                  TRIGGER_ACC_G, TRIGGER_GYR_DPS, TRIGGER_MIN_PROBABILITY);
         // it's time to prepare for sampling
         ei_printf("Starting inferencing in 2 seconds...\n");
         state = INFERENCE_WAITING;
