@@ -223,10 +223,7 @@ static void process_results(ei_impulse_result_t* result)
         results = cJSON_AddArrayToObject(response, "classification");
 
         for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-            cJSON *res = cJSON_CreateObject();
-            cJSON_AddStringToObject(res, "label", result->classification[ix].label);
-            cJSON_AddNumberToObject(res, "value", result->classification[ix].value);
-            cJSON_AddItemToArray(results, res);
+            cJSON_AddItemToArray(results, cJSON_CreateNumber(result->classification[ix].value));
         }
 #if EI_CLASSIFIER_HAS_ANOMALY == 1
         cJSON_AddNumberToObject(response, "anomaly", result->anomaly);

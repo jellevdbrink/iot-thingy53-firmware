@@ -43,6 +43,7 @@
 #include <cstdint>
 #include "ble/ble_nus.h"
 #include "cJSON.h"
+#include <cmath>
 
 LOG_MODULE_REGISTER(acc_sensor);
 
@@ -56,6 +57,8 @@ LOG_MODULE_REGISTER(acc_sensor);
 static const struct device *const accel_dev = DEVICE_DT_GET(DT_ALIAS(imu0));
 static float acc_data[ACC_AXIS_SAMPLED];
 static bool inertial_init = false;
+
+uint16_t imu_data_counter;
 
 /**
  * @brief      Setup accelerometer and gyroscope range and output data rate
@@ -88,6 +91,7 @@ bool ei_acc_init(void)
     }
 
     inertial_init = true;
+    imu_data_counter = 0;
     return true;
 }
 
@@ -129,41 +133,35 @@ static bool ei_acc_fetch_sample(void)
     acc_data[3] = (float)sensor_value_to_double(&raw_sample[4]) * DPS_PER_RAD_S;
     acc_data[5] = -(float)sensor_value_to_double(&raw_sample[5]) * DPS_PER_RAD_S;
 
-    cJSON* msg = cJSON_CreateObject();
+    imu_data_counter++;
     
-    if (!cJSON_AddStringToObject(msg, "type", "imu")) {
-        LOG_ERR("error: cJSON_AddStringToObject");
-    }
-    
-    if (!cJSON_AddNumberToObject(msg, "x", acc_data[0])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    if (!cJSON_AddNumberToObject(msg, "y", acc_data[1])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    if (!cJSON_AddNumberToObject(msg, "z", acc_data[2])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    
-    if (!cJSON_AddNumberToObject(msg, "gx", acc_data[3])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    if (!cJSON_AddNumberToObject(msg, "gy", acc_data[4])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    if (!cJSON_AddNumberToObject(msg, "gz", acc_data[5])) {
-        LOG_ERR("error: cJSON_AddNumberToObject");
-    }
-    
-    char* json_string = NULL;
-    json_string = cJSON_PrintUnformatted(msg);
-    if (json_string == NULL) {
-        LOG_ERR("Failed to print monitor.\n");
+    if (imu_data_counter == 1) {
+        double acc_total = sqrt(acc_data[0] * acc_data[0] + acc_data[1] * acc_data[1] + acc_data[2] * acc_data[2]);
+
+        cJSON* msg = cJSON_CreateObject();
+        
+        if (!cJSON_AddStringToObject(msg, "type", "imu")) {
+            LOG_ERR("error: cJSON_AddStringToObject");
+        }
+
+        if (!cJSON_AddNumberToObject(msg, "acc", acc_total)) {
+            LOG_ERR("error: cJSON_AddNumberToObject");
+        }
+        
+        char* json_string = NULL;
+        json_string = cJSON_PrintUnformatted(msg);
+        if (json_string == NULL) {
+            LOG_ERR("Failed to print monitor.\n");
+        }
+        
+        ble_nus_send_data((uint8_t*)json_string, strlen((const char*)json_string));
+        k_free(json_string);
+        cJSON_Delete(msg);
     }
 
-    ble_nus_send_data((uint8_t*)json_string, strlen((const char*)json_string));
-    k_free(json_string);
-    cJSON_Delete(msg);
+    if (imu_data_counter == 50) {
+        imu_data_counter = 0;
+    }
 
     return true;
 }
