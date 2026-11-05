@@ -121,12 +121,12 @@ static bool ei_acc_fetch_sample(void)
     }
 
     /* m/s2 -> g */
-    acc_data[1] = -(float)sensor_value_to_double(&raw_sample[0]) / MS2_PER_G;
-    acc_data[0] = -(float)sensor_value_to_double(&raw_sample[1]) / MS2_PER_G;
+    acc_data[1] = (float)sensor_value_to_double(&raw_sample[0]) / MS2_PER_G;
+    acc_data[0] = (float)sensor_value_to_double(&raw_sample[1]) / MS2_PER_G;
     acc_data[2] = -(float)sensor_value_to_double(&raw_sample[2]) / MS2_PER_G;
     /* rad/s -> dps */
-    acc_data[4] = -(float)sensor_value_to_double(&raw_sample[3]) * DPS_PER_RAD_S;
-    acc_data[3] = -(float)sensor_value_to_double(&raw_sample[4]) * DPS_PER_RAD_S;
+    acc_data[4] = (float)sensor_value_to_double(&raw_sample[3]) * DPS_PER_RAD_S;
+    acc_data[3] = (float)sensor_value_to_double(&raw_sample[4]) * DPS_PER_RAD_S;
     acc_data[5] = -(float)sensor_value_to_double(&raw_sample[5]) * DPS_PER_RAD_S;
 
     cJSON* msg = cJSON_CreateObject();
