@@ -62,11 +62,11 @@ static int samples_wr_index = 0;
 static EiDeviceThingy53 *dev = static_cast<EiDeviceThingy53*>(EiDeviceInfo::get_device());
 
 /* Triggered mode (non-continuous), works like the SmartTennisRacket firmware the model was
- * trained for: wait for a stroke (impact or fast swing), then classify the window centred on it */
+ * trained for: wait for a stroke (impact or fast swing), then classify the window around it */
 #define TRIGGER_ACC_G               13.0f   // impact, same threshold as the original firmware
 #define TRIGGER_GYR_DPS             800.0f  // fast swing, so strokes without a ball trigger too
-#define TRIGGER_PRE_SAMPLES         (EI_CLASSIFIER_RAW_SAMPLE_COUNT / 2)
-#define TRIGGER_HOLDOFF_SAMPLES     (EI_CLASSIFIER_RAW_SAMPLE_COUNT / 2)  // ignore follow-through
+#define TRIGGER_PRE_SAMPLES         (300 / EI_CLASSIFIER_INTERVAL_MS)   // peak rotation lands ~400 ms into the window
+#define TRIGGER_HOLDOFF_SAMPLES     (900 / EI_CLASSIFIER_INTERVAL_MS)   // ignore the racket swinging back
 #define TRIGGER_MIN_PROBABILITY     0.8f    // below this a stroke is reported as nothing
 
 /* trigger check assumes the axis order accX, accY, accZ, gyrX, gyrY, gyrZ */
@@ -121,7 +121,7 @@ static bool trigger_samples_callback(const void *raw_sample, uint32_t raw_sample
     }
 
     if(is_trigger_sample(sample)) {
-        // trigger sample ends up in the middle of the window
+        // keep TRIGGER_PRE_SAMPLES before the trigger sample, collect the rest of the window
         trigger_samples_left = EI_CLASSIFIER_RAW_SAMPLE_COUNT - TRIGGER_PRE_SAMPLES - 1;
     }
 
