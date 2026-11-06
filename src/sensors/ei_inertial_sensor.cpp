@@ -35,6 +35,7 @@
 /* Include ----------------------------------------------------------------- */
 #include "ei_inertial_sensor.h"
 #include "ei_device_thingy53.h"
+#include "model-parameters/model_metadata.h"
 #include "edge-impulse-sdk/porting/ei_classifier_porting.h"
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -53,6 +54,7 @@ LOG_MODULE_REGISTER(acc_sensor);
 #define IMU_ODR_HZ                  400
 #define MS2_PER_G                   9.80665f
 #define DPS_PER_RAD_S               57.29578f
+#define IMU_SEND_EVERY_SAMPLES      (100 / EI_CLASSIFIER_INTERVAL_MS)
 
 static const struct device *const accel_dev = DEVICE_DT_GET(DT_ALIAS(imu0));
 static float acc_data[ACC_AXIS_SAMPLED];
@@ -159,7 +161,7 @@ static bool ei_acc_fetch_sample(void)
         cJSON_Delete(msg);
     }
 
-    if (imu_data_counter == 50) {
+    if (imu_data_counter == IMU_SEND_EVERY_SAMPLES) {
         imu_data_counter = 0;
     }
 
