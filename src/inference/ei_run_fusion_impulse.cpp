@@ -66,7 +66,7 @@ static EiDeviceThingy53 *dev = static_cast<EiDeviceThingy53*>(EiDeviceInfo::get_
 #define TRIGGER_ACC_G               13.0f   // impact, same threshold as the original firmware
 #define TRIGGER_GYR_DPS             800.0f  // fast swing, so strokes without a ball trigger too
 #define TRIGGER_PRE_SAMPLES         (300 / EI_CLASSIFIER_INTERVAL_MS)   // peak rotation lands ~400 ms into the window
-#define TRIGGER_HOLDOFF_SAMPLES     (900 / EI_CLASSIFIER_INTERVAL_MS)   // ignore the racket swinging back
+#define TRIGGER_HOLDOFF_SAMPLES     (1300 / EI_CLASSIFIER_INTERVAL_MS)  // ignore the racket swinging back
 #define TRIGGER_MIN_PROBABILITY     0.8f    // below this a stroke is reported as nothing
 
 /* trigger check assumes the axis order accX, accY, accZ, gyrX, gyrY, gyrZ */
